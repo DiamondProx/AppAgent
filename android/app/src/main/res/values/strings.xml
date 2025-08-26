@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">AssistClient</string>
+    <string name="accessibility_service_description">智能手机助手无障碍服务，用于自动化控制设备操作</string>
 </resources>
