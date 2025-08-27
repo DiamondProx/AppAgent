@@ -437,6 +437,11 @@ fun TestScreen(
                 onClick = {
                     try {
                         addLog("开始获取带标注的截图...")
+                        addLog("当前时间戳: ${System.currentTimeMillis()}")
+                        
+                        // 检查Android版本和权限
+                        val androidVersion = android.os.Build.VERSION.SDK_INT
+                        addLog("当前Android API级别: $androidVersion")
                         
                         // 获取带标注的截图（保存到相册根目录）
                         val (annotatedImagePath, elemList) = deviceController.getAnnotatedScreenshot(
@@ -459,12 +464,23 @@ fun TestScreen(
                             if (elemList.size > 5) {
                                 addLog("... 还有 ${elemList.size - 5} 个元素")
                             }
+                            
+                            // 添加相册查看提示
+                            addLog("📱 请打开相册应用查看图片")
+                            addLog("📁 图片保存位置: /storage/emulated/0/Pictures/")
+                            addLog("🔍 如果找不到，请稍等片刻或重启相册应用")
+                            
                         } else {
                             addLog("✗ 获取带标注截图失败")
+                            addLog("ℹ️ 请检查：")
+                            addLog("  1. 无障碍权限是否启用")
+                            addLog("  2. 截图权限是否获取")
+                            addLog("  3. 存储权限是否允许")
                         }
                         
                     } catch (e: Exception) {
                         addLog("获取带标注截图时发生错误: ${e.message}")
+                        addLog("错误详情: ${e.stackTraceToString().take(200)}...")
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
@@ -547,8 +563,24 @@ fun TestScreen(
             Button(
                 onClick = {
                     if (isScreenshotPermissionGranted) {
-                        val success = deviceController.takeScreenshot()
-                        addLog("截图${if (success) "成功" else "失败"}")
+                        try {
+                            addLog("开始执行截图...")
+                            addLog("当前时间戳: ${System.currentTimeMillis()}")
+                            
+                            val success = deviceController.takeScreenshot()
+                            
+                            if (success) {
+                                addLog("✓ 截图成功")
+                                addLog("📱 请打开相册应用查看图片")
+                                addLog("📁 图片保存位置: /storage/emulated/0/Pictures/")
+                                addLog("🔍 如果找不到，请稍等片刻或重启相册应用")
+                            } else {
+                                addLog("✗ 截图失败")
+                                addLog("ℹ️ 请检查MediaProjection服务是否正常运行")
+                            }
+                        } catch (e: Exception) {
+                            addLog("截图时发生错误: ${e.message}")
+                        }
                     } else {
                         addLog("请先申请截图权限")
                     }
