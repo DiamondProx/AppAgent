@@ -8,6 +8,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -82,6 +83,12 @@ fun TestScreen(
     var isAccessibilityEnabled by remember { mutableStateOf(false) }
     var isServiceConnected by remember { mutableStateOf(false) }
     
+    // 滑动参数状态变量
+    var startX by remember { mutableStateOf("200") }
+    var startY by remember { mutableStateOf("800") }
+    var endX by remember { mutableStateOf("200") }
+    var endY by remember { mutableStateOf("400") }
+    
     // 刷新权限状态的函数
     val refreshState = {
         val newEnabledState = deviceController.isAccessibilityServiceEnabled()
@@ -130,254 +137,445 @@ fun TestScreen(
         logText += "${System.currentTimeMillis()}: $message\n"
     }
     
-    Column(
+    LazyColumn(
         modifier = modifier
             .fillMaxSize()
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text(
-            text = "设备控制测试",
-            style = MaterialTheme.typography.headlineMedium
-        )
+        item {
+            Text(
+                text = "设备控制测试",
+                style = MaterialTheme.typography.headlineMedium
+            )
+        }
         
         // 权限状态显示
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = when {
-                    !isAccessibilityEnabled -> MaterialTheme.colorScheme.errorContainer
-                    !isServiceConnected -> MaterialTheme.colorScheme.tertiaryContainer
-                    else -> MaterialTheme.colorScheme.primaryContainer
-                }
-            )
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(12.dp)
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = when {
+                        !isAccessibilityEnabled -> MaterialTheme.colorScheme.errorContainer
+                        !isServiceConnected -> MaterialTheme.colorScheme.tertiaryContainer
+                        else -> MaterialTheme.colorScheme.primaryContainer
+                    }
+                )
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp)
                 ) {
-                    Text(
-                        text = when {
-                            !isAccessibilityEnabled -> "⚠ 无障碍权限未启用"
-                            !isServiceConnected -> "⏳ 权限已启用，服务连接中..."
-                            else -> "✓ 无障碍服务已就绪"
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.weight(1f)
-                    )
-                    
-                    if (!isAccessibilityEnabled) {
-                        TextButton(
-                            onClick = { 
-                                deviceController.openAccessibilitySettings()
-                                addLog("打开无障碍设置页面")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = when {
+                                !isAccessibilityEnabled -> "⚠ 无障碍权限未启用"
+                                !isServiceConnected -> "⏳ 权限已启用，服务连接中..."
+                                else -> "✓ 无障碍服务已就绪"
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        
+                        if (!isAccessibilityEnabled) {
+                            TextButton(
+                                onClick = { 
+                                    deviceController.openAccessibilitySettings()
+                                    addLog("打开无障碍设置页面")
+                                }
+                            ) {
+                                Text("去设置")
                             }
-                        ) {
-                            Text("去设置")
-                        }
-                    } else {
-                        TextButton(
-                            onClick = { 
-                                refreshState()
-                                addLog("刷新权限状态")
+                        } else {
+                            TextButton(
+                                onClick = { 
+                                    refreshState()
+                                    addLog("刷新权限状态")
+                                }
+                            ) {
+                                Text("刷新")
                             }
-                        ) {
-                            Text("刷新")
                         }
                     }
-                }
-                
-                // 显示详细状态
-                if (isAccessibilityEnabled) {
-                    Text(
-                        text = "服务连接状态: ${if (isServiceConnected) "已连接" else "未连接"}",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
+                    
+                    // 显示详细状态
+                    if (isAccessibilityEnabled) {
+                        Text(
+                            text = "服务连接状态: ${if (isServiceConnected) "已连接" else "未连接"}",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
                 }
             }
         }
         
         // 坐标输入
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            OutlinedTextField(
-                value = xCoordinate,
-                onValueChange = { xCoordinate = it },
-                label = { Text("X坐标") },
-                modifier = Modifier.weight(1f)
-            )
-            OutlinedTextField(
-                value = yCoordinate,
-                onValueChange = { yCoordinate = it },
-                label = { Text("Y坐标") },
-                modifier = Modifier.weight(1f)
-            )
+        item {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = xCoordinate,
+                    onValueChange = { xCoordinate = it },
+                    label = { Text("X坐标") },
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedTextField(
+                    value = yCoordinate,
+                    onValueChange = { yCoordinate = it },
+                    label = { Text("Y坐标") },
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
         
         // 文本输入
-        OutlinedTextField(
-            value = inputText,
-            onValueChange = { inputText = it },
-            label = { Text("输入文本") },
-            modifier = Modifier.fillMaxWidth()
-        )
+        item {
+            OutlinedTextField(
+                value = inputText,
+                onValueChange = { inputText = it },
+                label = { Text("输入文本") },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
         
         // 控制按钮
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Button(
-                onClick = {
-                    if (!isAccessibilityEnabled) {
-                        addLog("无法执行返回操作：无障碍服务未启用")
-                        return@Button
-                    }
-                    if (!isServiceConnected) {
-                        addLog("无法执行返回操作：服务未连接，请稍后再试")
-                        return@Button
-                    }
-                    deviceController.back()
-                    addLog("执行返回操作")
-                },
-                modifier = Modifier.weight(1f),
-                enabled = isAccessibilityEnabled && isServiceConnected
+        item {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("返回")
-            }
-            
-            Button(
-                onClick = {
-                    if (!isAccessibilityEnabled) {
-                        addLog("无法执行点击操作：无障碍服务未启用")
-                        return@Button
-                    }
-                    if (!isServiceConnected) {
-                        addLog("无法执行点击操作：服务未连接，请稍后再试")
-                        return@Button
-                    }
-                    val x = xCoordinate.toIntOrNull() ?: 100
-                    val y = yCoordinate.toIntOrNull() ?: 100
-                    deviceController.tap(x, y)
-                    addLog("点击坐标: ($x, $y)")
-                },
-                modifier = Modifier.weight(1f),
-                enabled = isAccessibilityEnabled && isServiceConnected
-            ) {
-                Text("点击")
+                Button(
+                    onClick = {
+                        if (!isAccessibilityEnabled) {
+                            addLog("无法执行返回操作：无障碍服务未启用")
+                            return@Button
+                        }
+                        if (!isServiceConnected) {
+                            addLog("无法执行返回操作：服务未连接，请稍后再试")
+                            return@Button
+                        }
+                        deviceController.back()
+                        addLog("执行返回操作")
+                    },
+                    modifier = Modifier.weight(1f),
+                    enabled = isAccessibilityEnabled && isServiceConnected
+                ) {
+                    Text("返回")
+                }
+                
+                Button(
+                    onClick = {
+                        if (!isAccessibilityEnabled) {
+                            addLog("无法执行点击操作：无障碍服务未启用")
+                            return@Button
+                        }
+                        if (!isServiceConnected) {
+                            addLog("无法执行点击操作：服务未连接，请稍后再试")
+                            return@Button
+                        }
+                        val x = xCoordinate.toIntOrNull() ?: 100
+                        val y = yCoordinate.toIntOrNull() ?: 100
+                        deviceController.tap(x, y)
+                        addLog("点击坐标: ($x, $y)")
+                    },
+                    modifier = Modifier.weight(1f),
+                    enabled = isAccessibilityEnabled && isServiceConnected
+                ) {
+                    Text("点击")
+                }
             }
         }
         
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Button(
-                onClick = {
-                    if (!isAccessibilityEnabled) {
-                        addLog("无法执行长按操作：无障碍服务未启用")
-                        return@Button
-                    }
-                    val x = xCoordinate.toIntOrNull() ?: 100
-                    val y = yCoordinate.toIntOrNull() ?: 100
-                    deviceController.longPress(x, y)
-                    addLog("长按坐标: ($x, $y)")
-                },
-                modifier = Modifier.weight(1f),
-                enabled = isAccessibilityEnabled
+        item {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("长按")
-            }
-            
-            Button(
-                onClick = {
-                    if (!isAccessibilityEnabled) {
-                        addLog("无法执行文本输入：无障碍服务未启用")
-                        return@Button
-                    }
+                Button(
+                    onClick = {
+                        if (!isAccessibilityEnabled) {
+                            addLog("无法执行长按操作：无障碍服务未启用")
+                            return@Button
+                        }
+                        val x = xCoordinate.toIntOrNull() ?: 100
+                        val y = yCoordinate.toIntOrNull() ?: 100
+                        deviceController.longPress(x, y)
+                        addLog("长按坐标: ($x, $y)")
+                    },
+                    modifier = Modifier.weight(1f),
+                    enabled = isAccessibilityEnabled
+                ) {
+                    Text("长按")
+                }
+                
+                Button(
+                    onClick = {
+                        if (!isAccessibilityEnabled) {
+                            addLog("无法执行文本输入：无障碍服务未启用")
+                            return@Button
+                        }
 //                    deviceController.inputText(inputText)
-                    deviceController.inputText("123")
-                    addLog("输入文本: $inputText")
-                },
-                modifier = Modifier.weight(1f),
-                enabled = isAccessibilityEnabled
-            ) {
-                Text("输入文本")
+                        deviceController.inputText("123")
+                        addLog("输入文本: $inputText")
+                    },
+                    modifier = Modifier.weight(1f),
+                    enabled = isAccessibilityEnabled
+                ) {
+                    Text("输入文本")
+                }
             }
         }
         
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
+        item {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = {
+                        if (!isAccessibilityEnabled) {
+                            addLog("无法执行滑动操作：无障碍服务未启用")
+                            return@Button
+                        }
+                        deviceController.swipe(100, 100, 500, 500)
+                        addLog("滑动从(100,100)到(500,500)")
+                    },
+                    modifier = Modifier.weight(1f),
+                    enabled = isAccessibilityEnabled
+                ) {
+                    Text("滑动")
+                }
+                
+                Button(
+                    onClick = {
+                        if (!isAccessibilityEnabled) {
+                            addLog("无法获取UI结构：无障碍服务未启用")
+                            return@Button
+                        }
+                        val xml = deviceController.dumpUIXml()
+                        addLog("获取UI结构: ${xml.take(100)}...")
+                    },
+                    modifier = Modifier.weight(1f),
+                    enabled = isAccessibilityEnabled
+                ) {
+                    Text("获取UI")
+                }
+            }
+        }
+        
+        item {
             Button(
                 onClick = {
-                    if (!isAccessibilityEnabled) {
-                        addLog("无法执行滑动操作：无障碍服务未启用")
-                        return@Button
-                    }
-                    deviceController.swipe(100, 100, 500, 500)
-                    addLog("滑动从(100,100)到(500,500)")
+                    // 先请求权限，然后截图
+                    onRequestScreenshotPermission()
                 },
-                modifier = Modifier.weight(1f),
-                enabled = isAccessibilityEnabled
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Text("滑动")
+                Text("请求截图权限")
             }
-            
+        }
+        
+        item {
             Button(
                 onClick = {
-                    if (!isAccessibilityEnabled) {
-                        addLog("无法获取UI结构：无障碍服务未启用")
-                        return@Button
-                    }
-                    val xml = deviceController.dumpUIXml()
-                    addLog("获取UI结构: ${xml.take(100)}...")
+                    val success = deviceController.takeScreenshot()
+                    addLog("截图${if (success) "成功" else "失败"}")
                 },
-                modifier = Modifier.weight(1f),
-                enabled = isAccessibilityEnabled
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Text("获取UI")
+                Text("截图")
             }
         }
         
-        Button(
-            onClick = {
-                // 先请求权限，然后截图
-                onRequestScreenshotPermission()
-            },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("请求截图权限")
+        // 滑动测试区域
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp)
+                ) {
+                    Text(
+                        text = "滑动参数配置",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = startX,
+                            onValueChange = { startX = it },
+                            label = { Text("起始X") },
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = startY,
+                            onValueChange = { startY = it },
+                            label = { Text("起始Y") },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = endX,
+                            onValueChange = { endX = it },
+                            label = { Text("结束X") },
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = endY,
+                            onValueChange = { endY = it },
+                            label = { Text("结束Y") },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = {
+                                if (!isAccessibilityEnabled) {
+                                    addLog("无法执行向上滑动：无障碍服务未启用")
+                                    return@Button
+                                }
+                                deviceController.swipe(200, 800, 200, 400) // 向上滑动
+                                addLog("向上滑动：从(200,800)到(200,400)")
+                            },
+                            modifier = Modifier.weight(1f),
+                            enabled = isAccessibilityEnabled
+                        ) {
+                            Text("向上滑动")
+                        }
+                        
+                        Button(
+                            onClick = {
+                                if (!isAccessibilityEnabled) {
+                                    addLog("无法执行向下滑动：无障碍服务未启用")
+                                    return@Button
+                                }
+                                deviceController.swipe(200, 400, 200, 800) // 向下滑动
+                                addLog("向下滑动：从(200,400)到(200,800)")
+                            },
+                            modifier = Modifier.weight(1f),
+                            enabled = isAccessibilityEnabled
+                        ) {
+                            Text("向下滑动")
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Button(
+                        onClick = {
+                            if (!isAccessibilityEnabled) {
+                                addLog("无法执行自定义滑动：无障碍服务未启用")
+                                return@Button
+                            }
+                            val sx = startX.toIntOrNull() ?: 200
+                            val sy = startY.toIntOrNull() ?: 800
+                            val ex = endX.toIntOrNull() ?: 200
+                            val ey = endY.toIntOrNull() ?: 400
+                            deviceController.swipe(sx, sy, ex, ey)
+                            addLog("自定义滑动：从($sx,$sy)到($ex,$ey)")
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = isAccessibilityEnabled
+                    ) {
+                        Text("执行自定义滑动")
+                    }
+                }
+            }
         }
         
-        Button(
-            onClick = {
-                val success = deviceController.takeScreenshot()
-                addLog("截图${if (success) "成功" else "失败"}")
-            },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("截图")
+        // 调试说明
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp)
+                ) {
+                    Text(
+                        text = "测试说明",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "• 上下滑动本页面来测试滑动功能\n" +
+                                "• 确保无障碍服务已启用并连接\n" +
+                                "• 滑动坐标基于屏幕像素位置\n" +
+                                "• 可以通过调整坐标来控制滑动方向和距离\n" +
+                                "• 建议在空白区域测试滑动功能",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+        }
+        
+        // 额外的测试项目
+        repeat(5) { index ->
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        Text(
+                            text = "测试项目 ${index + 1}",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "这是第${index + 1}个测试项目，用于增加页面高度。\n" +
+                                    "您可以上下滑动来测试滑动功能。\n" +
+                                    "滑动测试对于验证设备控制功能非常重要。",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = {
+                                addLog("点击了测试项目 ${index + 1}")
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("测试按钮 ${index + 1}")
+                        }
+                    }
+                }
+            }
         }
         
         // 日志显示
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-        ) {
-            Text(
-                text = logText,
+        item {
+            Card(
                 modifier = Modifier
-                    .padding(8.dp)
-                    .fillMaxSize(),
-                style = MaterialTheme.typography.bodySmall
-            )
+                    .fillMaxWidth()
+                    .height(300.dp)
+            ) {
+                Text(
+                    text = logText,
+                    modifier = Modifier
+                        .padding(8.dp)
+                        .fillMaxSize(),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+        
+        // 底部占位空间
+        item {
+            Spacer(modifier = Modifier.height(200.dp))
         }
     }
 }
