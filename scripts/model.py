@@ -91,6 +91,7 @@ class QwenModel(BaseModel):
                 "content": content
             }
         ]
+        print(f"QwenModel prompt--->{content}")
         response = dashscope.MultiModalConversation.call(model=self.model, messages=messages)
         if response.status_code == HTTPStatus.OK:
             return True, response.output.choices[0].message.content[0]["text"]
@@ -98,11 +99,34 @@ class QwenModel(BaseModel):
             return False, response.message
 
 
+def extract_action_content(action_text):
+    """
+    提取Action内容，兼容带有<|begin_of_box|>标签的格式
+    
+    Args:
+        action_text: Action字段的原始文本
+        
+    Returns:
+        str: 提取出的实际action内容
+    """
+    # 检查是否包含box标签
+    if "<|begin_of_box|>" in action_text and "<|end_of_box|>" in action_text:
+        # 提取标签内的内容
+        box_content = re.findall(r"<\|begin_of_box\|>(.*?)<\|end_of_box\|>", action_text)
+        if box_content:
+            return box_content[0].strip()
+    
+    # 如果没有box标签，返回原始内容
+    return action_text.strip()
+
+
 def parse_explore_rsp(rsp):
     try:
+        print(f"parse_explore_rsp-->{rsp}")
         observation = re.findall(r"Observation: (.*?)$", rsp, re.MULTILINE)[0]
         think = re.findall(r"Thought: (.*?)$", rsp, re.MULTILINE)[0]
-        act = re.findall(r"Action: (.*?)$", rsp, re.MULTILINE)[0]
+        act_raw = re.findall(r"Action: (.*?)$", rsp, re.MULTILINE)[0]
+        act = extract_action_content(act_raw)
         last_act = re.findall(r"Summary: (.*?)$", rsp, re.MULTILINE)[0]
         print_with_color("Observation:", "yellow")
         print_with_color(observation, "magenta")
@@ -137,7 +161,7 @@ def parse_explore_rsp(rsp):
             print_with_color(f"ERROR: Undefined act {act_name}!", "red")
             return ["ERROR"]
     except Exception as e:
-        print_with_color(f"ERROR: an exception occurs while parsing the model response: {e}", "red")
+        print_with_color(f"ERROR: an exception occurs while parsing the model response1: {e}", "red")
         print_with_color(rsp, "red")
         return ["ERROR"]
 
@@ -146,7 +170,8 @@ def parse_grid_rsp(rsp):
     try:
         observation = re.findall(r"Observation: (.*?)$", rsp, re.MULTILINE)[0]
         think = re.findall(r"Thought: (.*?)$", rsp, re.MULTILINE)[0]
-        act = re.findall(r"Action: (.*?)$", rsp, re.MULTILINE)[0]
+        act_raw = re.findall(r"Action: (.*?)$", rsp, re.MULTILINE)[0]
+        act = extract_action_content(act_raw)
         last_act = re.findall(r"Summary: (.*?)$", rsp, re.MULTILINE)[0]
         print_with_color("Observation:", "yellow")
         print_with_color(observation, "magenta")
@@ -182,7 +207,7 @@ def parse_grid_rsp(rsp):
             print_with_color(f"ERROR: Undefined act {act_name}!", "red")
             return ["ERROR"]
     except Exception as e:
-        print_with_color(f"ERROR: an exception occurs while parsing the model response: {e}", "red")
+        print_with_color(f"ERROR: an exception occurs while parsing the model response2: {e}", "red")
         print_with_color(rsp, "red")
         return ["ERROR"]
 
@@ -206,6 +231,6 @@ def parse_reflect_rsp(rsp):
             print_with_color(f"ERROR: Undefined decision {decision}!", "red")
             return ["ERROR"]
     except Exception as e:
-        print_with_color(f"ERROR: an exception occurs while parsing the model response: {e}", "red")
+        print_with_color(f"ERROR: an exception occurs while parsing the model response3: {e}", "red")
         print_with_color(rsp, "red")
         return ["ERROR"]

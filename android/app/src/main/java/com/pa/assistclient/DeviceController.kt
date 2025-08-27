@@ -322,7 +322,11 @@ class DeviceController(private val context: Context) {
             accessibilityService?.let { service ->
                 val rootNode = service.rootInActiveWindow
                 rootNode?.let { node ->
-                    buildXmlFromNode(node)
+                    val xmlHeader = "<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>"
+                    val hierarchyStart = "<hierarchy rotation=\"0\">"
+                    val hierarchyEnd = "</hierarchy>"
+                    val nodeXml = buildXmlFromNode(node, 0)
+                    "$xmlHeader$hierarchyStart$nodeXml$hierarchyEnd"
                 } ?: "无法获取根节点"
             } ?: "无障碍服务未启用"
         } catch (e: Exception) {
@@ -331,33 +335,74 @@ class DeviceController(private val context: Context) {
         }
     }
     
-    private fun buildXmlFromNode(node: AccessibilityNodeInfo, depth: Int = 0): String {
-        val indent = "  ".repeat(depth)
-        val className = node.className ?: "unknown"
+    private fun buildXmlFromNode(node: AccessibilityNodeInfo, index: Int = 0): String {
+        val className = node.className?.toString() ?: ""
         val text = node.text?.toString() ?: ""
         val contentDesc = node.contentDescription?.toString() ?: ""
+        val resourceId = node.viewIdResourceName ?: ""
+        val packageName = node.packageName?.toString() ?: ""
         val bounds = android.graphics.Rect()
         node.getBoundsInScreen(bounds)
         
         val sb = StringBuilder()
-        sb.append("$indent<node")
-        sb.append(" class=\"$className\"")
-        if (text.isNotEmpty()) sb.append(" text=\"$text\"")
-        if (contentDesc.isNotEmpty()) sb.append(" content-desc=\"$contentDesc\"")
-        sb.append(" bounds=\"[${bounds.left},${bounds.top}][${bounds.right},${bounds.bottom}]\"")
-        sb.append(" clickable=\"${node.isClickable}\"")
-        sb.append(" enabled=\"${node.isEnabled}\"")
-        sb.append(">\n")
+        sb.append("<node")
         
-        for (i in 0 until node.childCount) {
-            val child = node.getChild(i)
-            child?.let {
-                sb.append(buildXmlFromNode(it, depth + 1))
+        // 检查是否是NAF (Not Accessible by Framework)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
+            try {
+                val isVisibleToUser = node.isVisibleToUser
+                if (!isVisibleToUser && text.isEmpty() && contentDesc.isEmpty()) {
+                    sb.append(" NAF=\"true\"")
+                }
+            } catch (e: Exception) {
+                // 忽略异常，继续处理
             }
         }
         
-        sb.append("$indent</node>\n")
+        sb.append(" index=\"$index\"")
+        sb.append(" text=\"${escapeXml(text)}\"")
+        sb.append(" resource-id=\"${escapeXml(resourceId)}\"")
+        sb.append(" class=\"${escapeXml(className)}\"")
+        sb.append(" package=\"${escapeXml(packageName)}\"")
+        sb.append(" content-desc=\"${escapeXml(contentDesc)}\"")
+        sb.append(" checkable=\"${node.isCheckable}\"")
+        sb.append(" checked=\"${node.isChecked}\"")
+        sb.append(" clickable=\"${node.isClickable}\"")
+        sb.append(" enabled=\"${node.isEnabled}\"")
+        sb.append(" focusable=\"${node.isFocusable}\"")
+        sb.append(" focused=\"${node.isFocused}\"")
+        sb.append(" scrollable=\"${node.isScrollable}\"")
+        sb.append(" long-clickable=\"${node.isLongClickable}\"")
+        sb.append(" password=\"${node.isPassword}\"")
+        sb.append(" selected=\"${node.isSelected}\"")
+        sb.append(" bounds=\"[${bounds.left},${bounds.top}][${bounds.right},${bounds.bottom}]\"")
+        
+        val childCount = node.childCount
+        if (childCount > 0) {
+            sb.append(">")
+            for (i in 0 until childCount) {
+                val child = node.getChild(i)
+                child?.let {
+                    sb.append(buildXmlFromNode(it, i))
+                }
+            }
+            sb.append("</node>")
+        } else {
+            sb.append(" />")
+        }
+        
         return sb.toString()
+    }
+    
+    /**
+     * 转义XML中的特殊字符
+     */
+    private fun escapeXml(text: String): String {
+        return text.replace("&", "&amp;")
+                  .replace("<", "&lt;")
+                  .replace(">", "&gt;")
+                  .replace("\"", "&quot;")
+                  .replace("'", "&apos;")
     }
     
     /**
