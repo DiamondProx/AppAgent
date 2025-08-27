@@ -413,6 +413,25 @@ fun TestScreen(
         }
         
         item {
+            Button(
+                onClick = {
+                    val (width, height) = deviceController.getDeviceSize()
+                    val (realWidth, realHeight) = deviceController.getRealDeviceSize()
+                    val density = deviceController.getDeviceDensity()
+                    val dpi = deviceController.getDeviceDpi()
+                    
+                    addLog("屏幕尺寸: ${width}x${height}")
+                    addLog("真实尺寸: ${realWidth}x${realHeight}")
+                    addLog("屏幕密度: $density")
+                    addLog("屏幕DPI: $dpi")
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("获取屏幕信息")
+            }
+        }
+        
+        item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(

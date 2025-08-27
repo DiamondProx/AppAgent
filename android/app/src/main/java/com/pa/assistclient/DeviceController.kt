@@ -451,7 +451,13 @@ class DeviceController(private val context: Context) {
             serviceConnection,
             Context.BIND_AUTO_CREATE
         )
-        context.startForegroundService(serviceIntent)
+        
+        // 根据Android版本启动服务
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(serviceIntent)
+        } else {
+            context.startService(serviceIntent)
+        }
         
         Log.d(TAG, "MediaProjection初始化完成")
     }
@@ -483,8 +489,85 @@ class DeviceController(private val context: Context) {
     }
     
     /**
-     * 清理资源
+     * 获取屏幕尺寸
+     * 返回屏幕的宽度和高度（像素）
      */
+    fun getDeviceSize(): Pair<Int, Int> {
+        return try {
+            val displayMetrics = context.resources.displayMetrics
+            val width = displayMetrics.widthPixels
+            val height = displayMetrics.heightPixels
+            
+            Log.d(TAG, "获取屏幕尺寸: ${width}x${height}")
+            Pair(width, height)
+        } catch (e: Exception) {
+            Log.e(TAG, "获取屏幕尺寸失败", e)
+            Pair(0, 0)
+        }
+    }
+    
+    /**
+     * 获取屏幕尺寸（使用WindowManager）
+     * 这个方法可以获取更准确的屏幕尺寸，包括系统栏等
+     */
+    fun getRealDeviceSize(): Pair<Int, Int> {
+        return try {
+            val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                // Android 11+ 使用新API
+                val windowMetrics = windowManager.currentWindowMetrics
+                val bounds = windowMetrics.bounds
+                val width = bounds.width()
+                val height = bounds.height()
+                
+                Log.d(TAG, "获取真实屏幕尺寸(Android 11+): ${width}x${height}")
+                Pair(width, height)
+            } else {
+                // Android 10及以下使用旧API
+                val displayMetrics = android.util.DisplayMetrics()
+                @Suppress("DEPRECATION")
+                windowManager.defaultDisplay.getRealMetrics(displayMetrics)
+                val width = displayMetrics.widthPixels
+                val height = displayMetrics.heightPixels
+                
+                Log.d(TAG, "获取真实屏幕尺寸(Android 10-): ${width}x${height}")
+                Pair(width, height)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "获取真实屏幕尺寸失败", e)
+            // 备用方案：使用基本方法
+            getDeviceSize()
+        }
+    }
+    
+    /**
+     * 获取屏幕密度信息
+     */
+    fun getDeviceDensity(): Float {
+        return try {
+            val density = context.resources.displayMetrics.density
+            Log.d(TAG, "获取屏幕密度: $density")
+            density
+        } catch (e: Exception) {
+            Log.e(TAG, "获取屏幕密度失败", e)
+            1.0f // 默认密度
+        }
+    }
+    
+    /**
+     * 获取屏幕DPI
+     */
+    fun getDeviceDpi(): Int {
+        return try {
+            val dpi = context.resources.displayMetrics.densityDpi
+            Log.d(TAG, "获取屏幕DPI: $dpi")
+            dpi
+        } catch (e: Exception) {
+            Log.e(TAG, "获取屏幕DPI失败", e)
+            160 // 默认DPI
+        }
+    }
     fun cleanup() {
         // 停止MediaProjectionService
         if (isServiceBound) {
