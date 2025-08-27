@@ -188,16 +188,103 @@ class DeviceController(private val context: Context) {
      * 文本输入
      */
     fun inputText(text: String) {
+        if (!isAccessibilityServiceEnabled()) {
+            Log.e(TAG, "无障碍服务未启用")
+            return
+        }
+        
         accessibilityService?.let { service ->
-            val focusedNode = service.rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-            focusedNode?.let { node ->
+            // 查找EditText类型且当前有焦点的控件
+            val inputNode = findFocusedEditText(service.rootInActiveWindow)
+            Log.e(TAG, "查找EditText+焦点结果：${inputNode}")
+
+            inputNode?.let { node ->
+                Log.d(TAG, "找到输入控件: className=${node.className}, text=${node.text}, editable=${node.isEditable}, focused=${node.isFocused}")
+
+                // 清空现有文本（如果有的话）
+                if (!node.text.isNullOrEmpty()) {
+                    val deleteArgs = android.os.Bundle().apply {
+                        putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 0)
+                        putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, node.text.length)
+                    }
+                    node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, deleteArgs)
+                    Log.d(TAG, "清空现有文本")
+                }
+
+                // 输入新文本
                 val arguments = android.os.Bundle().apply {
                     putString(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
                 }
-                node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
-                Log.d(TAG, "文本输入完成: $text")
-            } ?: Log.e(TAG, "未找到可输入的控件")
+                val success = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+
+                if (success) {
+                    Log.d(TAG, "文本输入完成: $text")
+                } else {
+                    Log.e(TAG, "文本输入失败，尝试使用粘贴方式")
+                    // 备用方案：使用剪贴板
+                    tryInputWithClipboard(node, text)
+                }
+            } ?: Log.e(TAG, "未找到EditText类型且有焦点的控件")
         } ?: Log.e(TAG, "无障碍服务未启用")
+    }
+    
+    /**
+     * 查找EditText类型且当前有焦点的控件
+     */
+    private fun findFocusedEditText(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        if (root == null) return null
+        
+        // 检查当前节点是否同时满足：EditText类型 + 有焦点
+        if (isEditTextType(root) && root.isFocused && root.isEnabled && root.isVisibleToUser) {
+            Log.d(TAG, "找到匹配的EditText控件: ${root.className}")
+            return root
+        }
+        
+        // 递归检查子节点
+        for (i in 0 until root.childCount) {
+            val child = root.getChild(i)
+            val result = findFocusedEditText(child)
+            if (result != null) {
+                return result
+            }
+        }
+        
+        return null
+    }
+    
+    /**
+     * 检查节点是否是EditText类型
+     */
+    private fun isEditTextType(node: AccessibilityNodeInfo?): Boolean {
+        if (node == null) return false
+        
+        val className = node.className?.toString() ?: ""
+        return className.contains("EditText") || 
+               className.contains("TextInputEditText") ||
+               className.contains("AutoCompleteTextView") ||
+               node.isEditable
+    }
+    
+    /**
+     * 使用剪贴板的备用输入方案
+     */
+    private fun tryInputWithClipboard(node: AccessibilityNodeInfo, text: String) {
+        try {
+            // 将文本复制到剪贴板
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            val clip = android.content.ClipData.newPlainText("input_text", text)
+            clipboard.setPrimaryClip(clip)
+            
+            // 执行粘贴操作
+            val success = node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+            if (success) {
+                Log.d(TAG, "剪贴板输入成功: $text")
+            } else {
+                Log.e(TAG, "剪贴板输入也失败")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "剪贴板操作失败", e)
+        }
     }
     
     /**

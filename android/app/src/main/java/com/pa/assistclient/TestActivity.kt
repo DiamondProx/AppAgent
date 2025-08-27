@@ -300,7 +300,8 @@ fun TestScreen(
                         addLog("无法执行文本输入：无障碍服务未启用")
                         return@Button
                     }
-                    deviceController.inputText(inputText)
+//                    deviceController.inputText(inputText)
+                    deviceController.inputText("123")
                     addLog("输入文本: $inputText")
                 },
                 modifier = Modifier.weight(1f),
