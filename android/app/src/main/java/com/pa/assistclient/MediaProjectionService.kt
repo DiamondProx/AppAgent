@@ -252,15 +252,52 @@ class MediaProjectionService : Service() {
 
     private fun saveBitmapToFile(bitmap: Bitmap): Boolean {
         return try {
-            val file = File(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
-                "screenshot_${System.currentTimeMillis()}.png"
-            )
-            val outputStream = FileOutputStream(file)
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
-            outputStream.close()
-            Log.d(TAG, "截图保存到: ${file.absolutePath}")
-            true
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Android 10+ 使用MediaStore API
+                val resolver = contentResolver
+                val contentValues = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, "screenshot_${System.currentTimeMillis()}.png")
+                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "image/png")
+                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES)
+                }
+                
+                val imageUri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+                imageUri?.let { uri ->
+                    resolver.openOutputStream(uri)?.use { outputStream ->
+                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
+                        Log.d(TAG, "截图已保存到相册（MediaStore）: $uri")
+                        return true
+                    }
+                }
+            } else {
+                // Android 9 及以下使用传统方法
+                val file = File(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+                    "screenshot_${System.currentTimeMillis()}.png"
+                )
+                val outputStream = FileOutputStream(file)
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
+                outputStream.close()
+                
+                // 通知系统媒体库更新，让截图在相册中显示
+                val mediaScanIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
+                mediaScanIntent.data = android.net.Uri.fromFile(file)
+                sendBroadcast(mediaScanIntent)
+                
+                // 使用MediaScannerConnection进行媒体扫描
+                android.media.MediaScannerConnection.scanFile(
+                    this,
+                    arrayOf(file.absolutePath),
+                    arrayOf("image/png")
+                ) { path, uri ->
+                    Log.d(TAG, "截图媒体扫描完成: $path -> $uri")
+                }
+                
+                Log.d(TAG, "截图已保存到相册: ${file.absolutePath}")
+                return true
+            }
+            
+            false
         } catch (e: Exception) {
             Log.e(TAG, "保存截图失败", e)
             false

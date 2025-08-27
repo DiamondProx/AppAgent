@@ -431,6 +431,49 @@ fun TestScreen(
             }
         }
         
+        // 获取带标注的截图
+        item {
+            Button(
+                onClick = {
+                    try {
+                        addLog("开始获取带标注的截图...")
+                        
+                        // 获取带标注的截图（保存到相册根目录）
+                        val (annotatedImagePath, elemList) = deviceController.getAnnotatedScreenshot(
+                            saveDir = "", // 不再使用，直接保存到相册根目录
+                            prefix = "appagent_annotated_${System.currentTimeMillis()}",
+                            uselessList = emptySet(),
+                            minDistance = 50.0,
+                            darkMode = false
+                        )
+                        
+                        if (annotatedImagePath != null) {
+                            addLog("✓ 带标注截图已保存: $annotatedImagePath")
+                            addLog("✓ 找到 ${elemList.size} 个可交互元素")
+                            
+                            // 显示元素详情（前5个）
+                            elemList.take(5).forEachIndexed { index, element ->
+                                addLog("元素${index + 1}: ${element.attrib} - ${element.text.ifEmpty { element.contentDesc.ifEmpty { element.className } }}")
+                            }
+                            
+                            if (elemList.size > 5) {
+                                addLog("... 还有 ${elemList.size - 5} 个元素")
+                            }
+                        } else {
+                            addLog("✗ 获取带标注截图失败")
+                        }
+                        
+                    } catch (e: Exception) {
+                        addLog("获取带标注截图时发生错误: ${e.message}")
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = isAccessibilityEnabled && isServiceConnected && isScreenshotPermissionGranted
+            ) {
+                Text("获取带标注截图")
+            }
+        }
+        
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),

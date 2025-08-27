@@ -579,4 +579,465 @@ class DeviceController(private val context: Context) {
             isServiceBound = false
         }
     }
+    
+    /**
+     * Android版本的UI元素类
+     */
+    data class AndroidUIElement(
+        val uid: String,
+        val bbox: Pair<Pair<Int, Int>, Pair<Int, Int>>, // ((left, top), (right, bottom))
+        val attrib: String, // "clickable" or "focusable"
+        val className: String = "",
+        val text: String = "",
+        val contentDesc: String = "",
+        val resourceId: String = ""
+    )
+    
+    /**
+     * 遍历无障碍节点树，收集可交互的UI元素
+     */
+    private fun traverseAccessibilityTree(
+        rootNode: AccessibilityNodeInfo?, 
+        elementList: MutableList<AndroidUIElement>,
+        targetAttribute: String, // "clickable" or "focusable"
+        uselessList: Set<String> = emptySet()
+    ) {
+        if (rootNode == null) return
+        
+        try {
+            // 检查当前节点是否符合条件
+            val isTarget = when (targetAttribute) {
+                "clickable" -> rootNode.isClickable
+                "focusable" -> rootNode.isFocusable
+                else -> false
+            }
+            
+            if (isTarget && rootNode.isVisibleToUser && rootNode.isEnabled) {
+                val bounds = android.graphics.Rect()
+                rootNode.getBoundsInScreen(bounds)
+                
+                // 生成元素ID
+                val elemId = generateElementId(rootNode, bounds)
+                
+                // 检查是否在无用列表中
+                if (elemId !in uselessList) {
+                    val element = AndroidUIElement(
+                        uid = elemId,
+                        bbox = Pair(
+                            Pair(bounds.left, bounds.top),
+                            Pair(bounds.right, bounds.bottom)
+                        ),
+                        attrib = targetAttribute,
+                        className = rootNode.className?.toString() ?: "",
+                        text = rootNode.text?.toString() ?: "",
+                        contentDesc = rootNode.contentDescription?.toString() ?: "",
+                        resourceId = rootNode.viewIdResourceName ?: ""
+                    )
+                    elementList.add(element)
+                }
+            }
+            
+            // 递归处理子节点
+            for (i in 0 until rootNode.childCount) {
+                val child = rootNode.getChild(i)
+                traverseAccessibilityTree(child, elementList, targetAttribute, uselessList)
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "遍历无障碍树时发生错误", e)
+        }
+    }
+    
+    /**
+     * 生成元素ID（类似Python版本的逻辑）
+     */
+    private fun generateElementId(node: AccessibilityNodeInfo, bounds: android.graphics.Rect): String {
+        val elemW = bounds.width()
+        val elemH = bounds.height()
+        
+        var elemId = if (!node.viewIdResourceName.isNullOrEmpty()) {
+            node.viewIdResourceName!!.replace(":", ".").replace("/", "_")
+        } else {
+            "${node.className}_${elemW}_${elemH}"
+        }
+        
+        // 添加内容描述（如果存在且较短）
+        val contentDesc = node.contentDescription?.toString()
+        if (!contentDesc.isNullOrEmpty() && contentDesc.length < 20) {
+            val cleanDesc = contentDesc.replace("/", "_").replace(" ", "").replace(":", "_")
+            elemId += "_$cleanDesc"
+        }
+        
+        return elemId
+    }
+    
+    /**
+     * 计算两个元素中心点之间的距离
+     */
+    private fun calculateDistance(elem1: AndroidUIElement, elem2: AndroidUIElement): Double {
+        val center1 = Pair(
+            (elem1.bbox.first.first + elem1.bbox.second.first) / 2,
+            (elem1.bbox.first.second + elem1.bbox.second.second) / 2
+        )
+        val center2 = Pair(
+            (elem2.bbox.first.first + elem2.bbox.second.first) / 2,
+            (elem2.bbox.first.second + elem2.bbox.second.second) / 2
+        )
+        
+        val dx = center1.first - center2.first
+        val dy = center1.second - center2.second
+        return kotlin.math.sqrt((dx * dx + dy * dy).toDouble())
+    }
+    
+    /**
+     * 获取带标注的截图
+     * 实现与Python版本相同的逻辑：获取可点击和可聚焦元素，去重，然后添加标注
+     * 最终图片保存到相册根目录 (/storage/emulated/0/Pictures/)
+     */
+    fun getAnnotatedScreenshot(
+        saveDir: String,
+        prefix: String,
+        uselessList: Set<String> = emptySet(),
+        minDistance: Double = 50.0,
+        darkMode: Boolean = false
+    ): Pair<String?, List<AndroidUIElement>> {
+        
+        if (!isAccessibilityServiceEnabled() || !isAccessibilityServiceConnected()) {
+            Log.e(TAG, "无障碍服务未启用或未连接")
+            return Pair(null, emptyList())
+        }
+        
+        try {
+            // 1. 获取截图
+            val success = takeScreenshot()
+            if (!success) {
+                Log.e(TAG, "获取截图失败")
+                return Pair(null, emptyList())
+            }
+            
+            // 等待截图保存完成
+            Thread.sleep(500)
+            
+            // 2. 获取无障碍节点树
+            val rootNode = accessibilityService?.rootInActiveWindow
+            if (rootNode == null) {
+                Log.e(TAG, "无法获取根节点")
+                return Pair(null, emptyList())
+            }
+            
+            // 3. 收集可点击和可聚焦的元素
+            val clickableList = mutableListOf<AndroidUIElement>()
+            val focusableList = mutableListOf<AndroidUIElement>()
+            
+            traverseAccessibilityTree(rootNode, clickableList, "clickable", uselessList)
+            traverseAccessibilityTree(rootNode, focusableList, "focusable", uselessList)
+            
+            Log.d(TAG, "找到可点击元素: ${clickableList.size}, 可聚焦元素: ${focusableList.size}")
+            
+            // 4. 合并元素列表并去重（类似Python逻辑）
+            val elemList = mutableListOf<AndroidUIElement>()
+            elemList.addAll(clickableList)
+            
+            // 添加不与可点击元素重叠的可聚焦元素
+            for (focusableElem in focusableList) {
+                var tooClose = false
+                for (clickableElem in clickableList) {
+                    val distance = calculateDistance(focusableElem, clickableElem)
+                    if (distance <= minDistance) {
+                        tooClose = true
+                        break
+                    }
+                }
+                if (!tooClose) {
+                    elemList.add(focusableElem)
+                }
+            }
+            
+            Log.d(TAG, "合并后的元素总数: ${elemList.size}")
+            
+            // 5. 在截图上添加标注
+            val annotatedImagePath = drawBboxMulti(
+                getLastScreenshotPath(),
+                saveDir,
+                "${prefix}_labeled",
+                elemList,
+                darkMode
+            )
+            
+            return Pair(annotatedImagePath, elemList)
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "获取带标注截图时发生错误", e)
+            return Pair(null, emptyList())
+        }
+    }
+    
+    /**
+     * 获取最后一次截图的路径
+     */
+    private fun getLastScreenshotPath(): String {
+        // 这里应该返回最新截图的路径
+        // 简化实现：假设截图保存在外部存储的Pictures目录
+        val picturesDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES)
+        val files = picturesDir.listFiles { file -> file.name.startsWith("screenshot_") && file.name.endsWith(".png") }
+        return files?.maxByOrNull { it.lastModified() }?.absolutePath ?: ""
+    }
+    
+    /**
+     * 在图片上绘制边界框和标签（类似Python的draw_bbox_multi）
+     */
+    private fun drawBboxMulti(
+        inputImagePath: String,
+        saveDir: String,
+        outputPrefix: String,
+        elemList: List<AndroidUIElement>,
+        darkMode: Boolean = false
+    ): String? {
+        
+        if (inputImagePath.isEmpty() || !java.io.File(inputImagePath).exists()) {
+            Log.e(TAG, "输入图片不存在: $inputImagePath")
+            return null
+        }
+        
+        try {
+            // 使用Android Canvas API绘制标注
+            val originalBitmap = android.graphics.BitmapFactory.decodeFile(inputImagePath)
+            val mutableBitmap = originalBitmap.copy(android.graphics.Bitmap.Config.ARGB_8888, true)
+            val canvas = android.graphics.Canvas(mutableBitmap)
+            
+            // 设置画笔
+            val textPaint = android.graphics.Paint().apply {
+                isAntiAlias = true
+                textSize = 48f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                color = if (darkMode) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+            }
+            
+            val backgroundPaint = android.graphics.Paint().apply {
+                color = if (darkMode) android.graphics.Color.WHITE else android.graphics.Color.BLACK
+                alpha = 128 // 50% 透明度
+            }
+            
+            val borderPaint = android.graphics.Paint().apply {
+                color = if (darkMode) android.graphics.Color.WHITE else android.graphics.Color.RED
+                style = android.graphics.Paint.Style.STROKE
+                strokeWidth = 3f
+            }
+            
+            // 为每个元素绘制标注
+            elemList.forEachIndexed { index, element ->
+                try {
+                    val label = (index + 1).toString()
+                    val left = element.bbox.first.first.toFloat()
+                    val top = element.bbox.first.second.toFloat()
+                    val right = element.bbox.second.first.toFloat()
+                    val bottom = element.bbox.second.second.toFloat()
+                    
+                    // 计算标签位置（元素中心偏移）
+                    val centerX = (left + right) / 2
+                    val centerY = (top + bottom) / 2
+                    val labelX = centerX + 10
+                    val labelY = centerY + 10
+                    
+                    // 绘制边界框（可选）
+                    canvas.drawRect(left, top, right, bottom, borderPaint)
+                    
+                    // 测量文本尺寸
+                    val textBounds = android.graphics.Rect()
+                    textPaint.getTextBounds(label, 0, label.length, textBounds)
+                    
+                    // 绘制背景矩形
+                    val padding = 8f
+                    val bgLeft = labelX - padding
+                    val bgTop = labelY - textBounds.height() - padding
+                    val bgRight = labelX + textBounds.width() + padding
+                    val bgBottom = labelY + padding
+                    
+                    canvas.drawRect(bgLeft, bgTop, bgRight, bgBottom, backgroundPaint)
+                    
+                    // 绘制文本
+                    canvas.drawText(label, labelX, labelY, textPaint)
+                    
+                } catch (e: Exception) {
+                    Log.e(TAG, "绘制元素标注时发生错误: ${e.message}")
+                }
+            }
+            
+            // 保存标注后的图片到相册根目录
+            val picturesDir = android.os.Environment.getExternalStoragePublicDirectory(
+                android.os.Environment.DIRECTORY_PICTURES
+            )
+            
+            val outputPath = "${picturesDir.absolutePath}/${outputPrefix}.png"
+            val success = saveBitmapToGallery(mutableBitmap, outputPrefix)
+            
+            if (success) {
+                Log.d(TAG, "带标注的截图已保存到相册: $outputPath")
+                return outputPath
+            } else {
+                Log.e(TAG, "保存带标注截图失败")
+                return null
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "绘制标注时发生错误", e)
+            return null
+        }
+    }
+    
+    /**
+     * 快速获取当前屏幕的UI元素列表（用于调试和测试）
+     */
+    fun getCurrentUIElements(): List<AndroidUIElement> {
+        if (!isAccessibilityServiceEnabled() || !isAccessibilityServiceConnected()) {
+            Log.w(TAG, "无障碍服务未启用或未连接")
+            return emptyList()
+        }
+        
+        val rootNode = accessibilityService?.rootInActiveWindow ?: return emptyList()
+        
+        val clickableList = mutableListOf<AndroidUIElement>()
+        val focusableList = mutableListOf<AndroidUIElement>()
+        
+        traverseAccessibilityTree(rootNode, clickableList, "clickable")
+        traverseAccessibilityTree(rootNode, focusableList, "focusable")
+        
+        val elemList = mutableListOf<AndroidUIElement>()
+        elemList.addAll(clickableList)
+        
+        // 添加不重叠的可聚焦元素
+        for (focusableElem in focusableList) {
+            var tooClose = false
+            for (clickableElem in clickableList) {
+                if (calculateDistance(focusableElem, clickableElem) <= 50.0) {
+                    tooClose = true
+                    break
+                }
+            }
+            if (!tooClose) {
+                elemList.add(focusableElem)
+            }
+        }
+        
+        return elemList
+    }
+    
+    /**
+     * 使用MediaStore API保存图片到相册（支持Android 10+）
+     * 修复版本：确保图片能在相册中立即显示
+     */
+    private fun saveBitmapToGallery(bitmap: android.graphics.Bitmap, fileName: String): Boolean {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Android 10+ 使用MediaStore API
+                val resolver = context.contentResolver
+                val contentValues = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, "$fileName.png")
+                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "image/png")
+                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_PICTURES)
+                    // 添加更多元数据确保正确索引
+                    put(android.provider.MediaStore.Images.Media.DATE_ADDED, System.currentTimeMillis() / 1000)
+                    put(android.provider.MediaStore.Images.Media.DATE_MODIFIED, System.currentTimeMillis() / 1000)
+                    put(android.provider.MediaStore.Images.Media.WIDTH, bitmap.width)
+                    put(android.provider.MediaStore.Images.Media.HEIGHT, bitmap.height)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        put(android.provider.MediaStore.Images.Media.IS_PENDING, 1) // 标记为待处理
+                    }
+                }
+                
+                val imageUri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+                imageUri?.let { uri ->
+                    resolver.openOutputStream(uri)?.use { outputStream ->
+                        val compressSuccess = bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, outputStream)
+                        outputStream.flush()
+                        
+                        if (compressSuccess) {
+                            // 完成写入，清除待处理标志
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                val updateValues = android.content.ContentValues().apply {
+                                    put(android.provider.MediaStore.Images.Media.IS_PENDING, 0)
+                                }
+                                resolver.update(uri, updateValues, null, null)
+                            }
+                            
+                            Log.d(TAG, "✓ 使用MediaStore API保存图片成功: $uri")
+                            Log.d(TAG, "✓ 图片文件名: $fileName.png")
+                            Log.d(TAG, "✓ 图片尺寸: ${bitmap.width}x${bitmap.height}")
+                            return true
+                        } else {
+                            Log.e(TAG, "图片压缩失败")
+                        }
+                    }
+                } ?: Log.e(TAG, "无法创建MediaStore URI")
+            } else {
+                // Android 9 及以下使用传统方法 + 强化媒体扫描
+                val picturesDir = android.os.Environment.getExternalStoragePublicDirectory(
+                    android.os.Environment.DIRECTORY_PICTURES
+                )
+                
+                // 确保目录存在
+                if (!picturesDir.exists()) {
+                    picturesDir.mkdirs()
+                }
+                
+                val file = java.io.File(picturesDir, "$fileName.png")
+                
+                java.io.FileOutputStream(file).use { outputStream ->
+                    val compressSuccess = bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, outputStream)
+                    outputStream.flush()
+                    outputStream.close()
+                    
+                    if (!compressSuccess) {
+                        Log.e(TAG, "传统方式图片压缩失败")
+                        return false
+                    }
+                }
+                
+                // 验证文件是否成功创建
+                if (!file.exists() || file.length() == 0L) {
+                    Log.e(TAG, "文件创建失败或为空: ${file.absolutePath}")
+                    return false
+                }
+                
+                Log.d(TAG, "✓ 文件已创建: ${file.absolutePath} (${file.length()} bytes)")
+                
+                // 多重媒体扫描策略
+                try {
+                    // 方法1: 广播媒体扫描
+                    val mediaScanIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
+                    mediaScanIntent.data = android.net.Uri.fromFile(file)
+                    context.sendBroadcast(mediaScanIntent)
+                    Log.d(TAG, "已发送媒体扫描广播")
+                    
+                    // 方法2: MediaScannerConnection
+                    android.media.MediaScannerConnection.scanFile(
+                        context,
+                        arrayOf(file.absolutePath),
+                        arrayOf("image/png")
+                    ) { path, uri ->
+                        Log.d(TAG, "✓ MediaScannerConnection扫描完成: $path -> $uri")
+                    }
+                    
+                    // 方法3: 强制刷新整个Pictures目录
+                    val refreshIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
+                    refreshIntent.data = android.net.Uri.fromFile(picturesDir)
+                    context.sendBroadcast(refreshIntent)
+                    
+                    Log.d(TAG, "✓ 传统方式保存图片成功: ${file.absolutePath}")
+                    Log.d(TAG, "✓ 已触发多重媒体扫描")
+                    return true
+                    
+                } catch (scanException: Exception) {
+                    Log.w(TAG, "媒体扫描时发生警告: ${scanException.message}")
+                    // 即使媒体扫描出错，文件也已保存成功
+                    return true
+                }
+            }
+            
+            false
+        } catch (e: Exception) {
+            Log.e(TAG, "保存图片到相册失败", e)
+            false
+        }
+    }
 }
