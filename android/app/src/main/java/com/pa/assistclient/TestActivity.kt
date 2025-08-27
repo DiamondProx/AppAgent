@@ -3,6 +3,7 @@ package com.pa.assistclient
 import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -13,7 +14,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import com.pa.assistclient.ui.theme.AssistClientTheme
 
 class TestActivity : ComponentActivity() {
@@ -27,7 +30,13 @@ class TestActivity : ComponentActivity() {
         if (result.resultCode == Activity.RESULT_OK) {
             result.data?.let { data ->
                 deviceController.initMediaProjection(result.resultCode, data)
+                // 权限获取成功后，添加日志并保持在当前页面
+                Log.d("TestActivity", "截图权限获取成功")
+                // 注意：由于权限请求可能导致Activity重建，我们需要在onResume中处理状态更新
             }
+        } else {
+            // 权限被拒绝
+            Log.w("TestActivity", "截图权限被拒绝")
         }
     }
     
@@ -43,8 +52,12 @@ class TestActivity : ComponentActivity() {
                     TestScreen(
                         deviceController = deviceController,
                         onRequestScreenshotPermission = {
-                            val intent = deviceController.requestScreenshotPermission()
-                            screenshotPermissionLauncher.launch(intent)
+                            try {
+                                val intent = deviceController.requestScreenshotPermission()
+                                screenshotPermissionLauncher.launch(intent)
+                            } catch (e: Exception) {
+                                Log.e("TestActivity", "请求截图权限失败", e)
+                            }
                         },
                         onRefreshStateCallback = { callback ->
                             refreshPermissionState = callback
@@ -60,6 +73,10 @@ class TestActivity : ComponentActivity() {
         super.onResume()
         // 从设置页面返回时刷新权限状态
         refreshPermissionState?.invoke()
+        
+        // 检查截图权限是否已经获取
+        // 由于MediaProjection的特殊性，我们通过DeviceController来检查状态
+        Log.d("TestActivity", "页面恢复，检查权限状态")
     }
     
     override fun onDestroy() {
@@ -76,6 +93,7 @@ fun TestScreen(
     onRefreshStateCallback: ((() -> Unit) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     var logText by remember { mutableStateOf("设备控制日志:\n") }
     var inputText by remember { mutableStateOf("") }
     var xCoordinate by remember { mutableStateOf("100") }
@@ -89,10 +107,14 @@ fun TestScreen(
     var endX by remember { mutableStateOf("200") }
     var endY by remember { mutableStateOf("400") }
     
+    // 截图权限状态
+    var isScreenshotPermissionGranted by remember { mutableStateOf(false) }
+    
     // 刷新权限状态的函数
     val refreshState = {
         val newEnabledState = deviceController.isAccessibilityServiceEnabled()
         val newConnectedState = deviceController.isAccessibilityServiceConnected()
+        val newScreenshotState = deviceController.isScreenshotPermissionGranted()
         
         if (newEnabledState != isAccessibilityEnabled) {
             isAccessibilityEnabled = newEnabledState
@@ -111,12 +133,30 @@ fun TestScreen(
                 logText += "⚠ 无障碍服务未连接（请稍后再试）\n"
             }
         }
+        
+        if (newScreenshotState != isScreenshotPermissionGranted) {
+            isScreenshotPermissionGranted = newScreenshotState
+            if (newScreenshotState) {
+                logText += "✓ 录屏服务已启动\n"
+            } else {
+                logText += "⚠ 录屏服务已停止\n"
+            }
+        }
+    }
+    
+    // 定期检查服务状态
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(2000) // 每2秒检查一次
+            refreshState()
+        }
     }
     
     // 检查权限状态
     LaunchedEffect(Unit) {
         isAccessibilityEnabled = deviceController.isAccessibilityServiceEnabled()
         isServiceConnected = deviceController.isAccessibilityServiceConnected()
+        isScreenshotPermissionGranted = deviceController.isScreenshotPermissionGranted()
         
         if (!isAccessibilityEnabled) {
             logText += "⚠ 警告：无障碍服务未启用，请先开启权限\n"
@@ -127,6 +167,12 @@ fun TestScreen(
             } else {
                 logText += "⚠ 无障碍服务正在连接中，请稍后再试...\n"
             }
+        }
+        
+        if (isScreenshotPermissionGranted) {
+            logText += "✓ 截图权限已获取\n"
+        } else {
+            logText += "⚠ 截图权限未获取，请点击申请按钮\n"
         }
         
         // 将刷新函数传递给父组件
@@ -367,26 +413,88 @@ fun TestScreen(
         }
         
         item {
-            Button(
-                onClick = {
-                    // 先请求权限，然后截图
-                    onRequestScreenshotPermission()
-                },
-                modifier = Modifier.fillMaxWidth()
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isScreenshotPermissionGranted) 
+                        MaterialTheme.colorScheme.primaryContainer 
+                    else 
+                        MaterialTheme.colorScheme.tertiaryContainer
+                )
             ) {
-                Text("请求截图权限")
+                Column(
+                    modifier = Modifier.padding(16.dp)
+                ) {
+                    Text(
+                        text = "截图权限管理",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (isScreenshotPermissionGranted) 
+                                "✓ 截图权限已授权" 
+                            else 
+                                "⚠ 截图权限未授权",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        
+                        Button(
+                            onClick = {
+                                if (isScreenshotPermissionGranted) {
+                                    // 停止服务
+                                    try {
+                                        val stopIntent = Intent(context, MediaProjectionService::class.java).apply {
+                                            action = MediaProjectionService.ACTION_STOP_PROJECTION
+                                        }
+                                        context.startService(stopIntent)
+                                        addLog("正在停止录屏服务...")
+                                    } catch (e: Exception) {
+                                        addLog("停止服务失败: ${e.message}")
+                                    }
+                                } else {
+                                    // 申请权限
+                                    try {
+                                        onRequestScreenshotPermission()
+                                        addLog("正在请求截图权限...")
+                                    } catch (e: Exception) {
+                                        addLog("请求截图权限失败: ${e.message}")
+                                    }
+                                }
+                            }
+                        ) {
+                            Text(if (isScreenshotPermissionGranted) "停止服务" else "申请权限")
+                        }
+                    }
+                    
+                    Text(
+                        text = "注意：授权后可能会暂时回到桌面，这是正常现象。请重新打开应用继续使用。",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
             }
         }
         
         item {
             Button(
                 onClick = {
-                    val success = deviceController.takeScreenshot()
-                    addLog("截图${if (success) "成功" else "失败"}")
+                    if (isScreenshotPermissionGranted) {
+                        val success = deviceController.takeScreenshot()
+                        addLog("截图${if (success) "成功" else "失败"}")
+                    } else {
+                        addLog("请先申请截图权限")
+                    }
                 },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                enabled = isScreenshotPermissionGranted
             ) {
-                Text("截图")
+                Text("执行截图")
             }
         }
         

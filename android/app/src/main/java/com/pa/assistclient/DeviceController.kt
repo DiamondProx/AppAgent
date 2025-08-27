@@ -3,8 +3,10 @@ package com.pa.assistclient
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.app.Activity
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.ServiceConnection
 import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.PixelFormat
@@ -16,6 +18,7 @@ import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Environment
+import android.os.IBinder
 import android.provider.Settings
 import android.text.TextUtils
 import android.util.DisplayMetrics
@@ -104,6 +107,25 @@ class DeviceController(private val context: Context) {
     private var virtualDisplay: VirtualDisplay? = null
     private val mediaProjectionManager by lazy {
         context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+    }
+    
+    // MediaProjectionService连接
+    private var mediaProjectionService: MediaProjectionService? = null
+    private var isServiceBound = false
+    
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            val binder = service as MediaProjectionService.MediaProjectionBinder
+            mediaProjectionService = binder.getService()
+            isServiceBound = true
+            Log.d(TAG, "MediaProjectionService已连接")
+        }
+        
+        override fun onServiceDisconnected(name: ComponentName?) {
+            mediaProjectionService = null
+            isServiceBound = false
+            Log.d(TAG, "MediaProjectionService已断开")
+        }
     }
     
     /**
@@ -406,95 +428,50 @@ class DeviceController(private val context: Context) {
     }
     
     /**
-     * 初始化MediaProjection用于截图
+     * 检查截图权限是否已获取
      */
-    fun initMediaProjection(resultCode: Int, data: Intent) {
-        mediaProjection = mediaProjectionManager.getMediaProjection(resultCode, data)
-        setupImageReader()
+    fun isScreenshotPermissionGranted(): Boolean {
+        return mediaProjectionService?.isProjectionActive() == true
     }
     
     /**
-     * 设置ImageReader
+     * 初始化MediaProjection用于截图
      */
-    private fun setupImageReader() {
-        val displayMetrics = DisplayMetrics()
-        if (context is Activity) {
-            context.windowManager.defaultDisplay.getMetrics(displayMetrics)
+    fun initMediaProjection(resultCode: Int, data: Intent) {
+        // 启动MediaProjectionService
+        val serviceIntent = Intent(context, MediaProjectionService::class.java).apply {
+            action = MediaProjectionService.ACTION_START_PROJECTION
+            putExtra(MediaProjectionService.EXTRA_RESULT_CODE, resultCode)
+            putExtra(MediaProjectionService.EXTRA_RESULT_DATA, data)
         }
         
-        imageReader = ImageReader.newInstance(
-            displayMetrics.widthPixels,
-            displayMetrics.heightPixels,
-            PixelFormat.RGBA_8888,
-            1
+        // 绑定并启动服务
+        context.bindService(
+            Intent(context, MediaProjectionService::class.java),
+            serviceConnection,
+            Context.BIND_AUTO_CREATE
         )
+        context.startForegroundService(serviceIntent)
         
-        virtualDisplay = mediaProjection?.createVirtualDisplay(
-            "screenshot",
-            displayMetrics.widthPixels,
-            displayMetrics.heightPixels,
-            displayMetrics.densityDpi,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            imageReader?.surface,
-            null,
-            null
-        )
+        Log.d(TAG, "MediaProjection初始化完成")
     }
     
     /**
      * 截图功能
      */
     fun takeScreenshot(): Boolean {
-        return try {
-            if (mediaProjection == null) {
-                Log.e(TAG, "MediaProjection未初始化，请先请求权限")
-                return false
+        return if (isServiceBound && mediaProjectionService != null) {
+            // 通过服务执行截图
+            val serviceIntent = Intent(context, MediaProjectionService::class.java).apply {
+                action = MediaProjectionService.ACTION_TAKE_SCREENSHOT
             }
+            context.startService(serviceIntent)
             
-            imageReader?.let { reader ->
-                val image = reader.acquireLatestImage()
-                image?.let {
-                    val bitmap = imageToBitmap(it)
-                    saveBitmapToFile(bitmap)
-                    it.close()
-                    Log.d(TAG, "截图成功")
-                    true
-                } ?: false
-            } ?: false
-        } catch (e: Exception) {
-            Log.e(TAG, "截图失败", e)
+            // 返回Path的判断依赖于服务的实现
+            mediaProjectionService?.takeScreenshot() ?: false
+        } else {
+            Log.e(TAG, "MediaProjectionService未初始化，请先请求权限")
             false
-        }
-    }
-    
-    private fun imageToBitmap(image: Image): Bitmap {
-        val planes = image.planes
-        val buffer = planes[0].buffer
-        val pixelStride = planes[0].pixelStride
-        val rowStride = planes[0].rowStride
-        val rowPadding = rowStride - pixelStride * image.width
-        
-        val bitmap = Bitmap.createBitmap(
-            image.width + rowPadding / pixelStride,
-            image.height,
-            Bitmap.Config.ARGB_8888
-        )
-        bitmap.copyPixelsFromBuffer(buffer)
-        return bitmap
-    }
-    
-    private fun saveBitmapToFile(bitmap: Bitmap) {
-        try {
-            val file = File(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
-                "screenshot_${System.currentTimeMillis()}.png"
-            )
-            val outputStream = FileOutputStream(file)
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
-            outputStream.close()
-            Log.d(TAG, "截图保存到: ${file.absolutePath}")
-        } catch (e: Exception) {
-            Log.e(TAG, "保存截图失败", e)
         }
     }
     
@@ -509,8 +486,14 @@ class DeviceController(private val context: Context) {
      * 清理资源
      */
     fun cleanup() {
-        virtualDisplay?.release()
-        imageReader?.close()
-        mediaProjection?.stop()
+        // 停止MediaProjectionService
+        if (isServiceBound) {
+            val serviceIntent = Intent(context, MediaProjectionService::class.java).apply {
+                action = MediaProjectionService.ACTION_STOP_PROJECTION
+            }
+            context.startService(serviceIntent)
+            context.unbindService(serviceConnection)
+            isServiceBound = false
+        }
     }
 }
