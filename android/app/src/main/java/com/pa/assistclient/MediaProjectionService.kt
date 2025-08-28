@@ -1,6 +1,9 @@
 package com.pa.assistclient
 
-import android.app.*
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
@@ -14,13 +17,17 @@ import android.media.projection.MediaProjectionManager
 import android.os.Binder
 import android.os.Build
 import android.os.Environment
+import android.os.Handler
+import android.os.HandlerThread
 import android.os.IBinder
 import android.util.DisplayMetrics
 import android.util.Log
-import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MediaProjectionService : Service() {
     companion object {
@@ -42,6 +49,12 @@ class MediaProjectionService : Service() {
     private var mediaProjectionManager: MediaProjectionManager? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
+    
+    // 截图专用Handler线程和同步控制
+    private var screenshotHandlerThread: HandlerThread? = null
+    private var screenshotHandler: Handler? = null
+    private val screenshotLock = Any()
+    private val isCapturing = AtomicBoolean(false)
 
     inner class MediaProjectionBinder : Binder() {
         fun getService(): MediaProjectionService = this@MediaProjectionService
@@ -51,6 +64,12 @@ class MediaProjectionService : Service() {
         super.onCreate()
         mediaProjectionManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         createNotificationChannel()
+        
+        // 创建截图Handler线程
+        screenshotHandlerThread = HandlerThread("ScreenshotThread").also {
+            it.start()
+            screenshotHandler = Handler(it.looper)
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder {
@@ -192,11 +211,12 @@ class MediaProjectionService : Service() {
             windowManager.defaultDisplay.getMetrics(displayMetrics)
         }
 
+        // 增加maxImages提供缓冲，防止资源冲突
         imageReader = ImageReader.newInstance(
             displayMetrics.widthPixels,
             displayMetrics.heightPixels,
             PixelFormat.RGBA_8888,
-            1
+            3  // 增加缓冲区大小，防止IllegalStateException
         )
 
         virtualDisplay = mediaProjection?.createVirtualDisplay(
@@ -212,30 +232,174 @@ class MediaProjectionService : Service() {
     }
 
     fun takeScreenshot(): Boolean {
-        return try {
-            Log.d(TAG, "takeScreenshot")
-            if (mediaProjection == null) {
-                Log.e(TAG, "MediaProjection未初始化")
-                return false
+        return synchronized(screenshotLock) {
+            try {
+                Log.d(TAG, "开始截图，当前时间: ${System.currentTimeMillis()}")
+                
+                if (mediaProjection == null) {
+                    Log.e(TAG, "MediaProjection未初始化")
+                    return false
+                }
+                
+                if (isCapturing.get()) {
+                    Log.w(TAG, "截图正在进行中，跳过此次请求")
+                    return false
+                }
+                
+                isCapturing.set(true)
+                
+                // 首先尝试高效的回调机制
+                var success = takeScreenshotWithCallback()
+                
+                // 回调失败时使用改进的轮询方式
+                if (!success) {
+                    Log.d(TAG, "回调方式失败，尝试轮询方式")
+                    success = takeScreenshotWithPolling()
+                }
+                
+                Log.d(TAG, "截图结果: ${if (success) "成功" else "失败"}")
+                success
+            } catch (e: Exception) {
+                Log.e(TAG, "截图失败", e)
+                false
+            } finally {
+                isCapturing.set(false)
             }
-
+        }
+    }
+    
+    // 使用回调机制的高效截图方法
+    private fun takeScreenshotWithCallback(): Boolean {
+        return try {
             imageReader?.let { reader ->
-                Log.d(TAG, "reader.acquireLatestImage.start()")
-                val image = reader.acquireLatestImage()
-                Log.d(TAG, "reader.acquireLatestImage.end() image：" + image)
-                image?.let {
-                    val bitmap = imageToBitmap(it)
-                    val success = saveBitmapToFile(bitmap)
-                    it.close()
-                    Log.d(TAG, "截图${if (success) "成功" else "失败"}")
+                val latch = CountDownLatch(1)
+                var resultBitmap: Bitmap? = null
+                var callbackSuccess = false
+                
+                Log.d(TAG, "使用回调机制截图")
+                
+                // 清理旧图片
+                cleanupOldImages(reader)
+                
+                // 触发VirtualDisplay重新渲染
+                triggerDisplayRender()
+                
+                val listener = ImageReader.OnImageAvailableListener {
+                    try {
+                        Log.d(TAG, "回调触发：尝试获取图片")
+                        val image = it.acquireLatestImage()
+                        Log.d(TAG, "回调获取图片结果: $image")
+                        image?.let { img ->
+                            resultBitmap = imageToBitmap(img)
+                            callbackSuccess = true
+                            img.close()
+                            Log.d(TAG, "回调成功处理图片")
+                        } ?: Log.w(TAG, "回调中图片为null")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "回调处理图片失败", e)
+                    } finally {
+                        latch.countDown()
+                    }
+                }
+                
+                // 在专用线程设置监听器
+                reader.setOnImageAvailableListener(listener, screenshotHandler)
+                
+                // 等待回调完成或超时（3秒）
+                val completed = latch.await(3, TimeUnit.SECONDS)
+                
+                // 清除监听器
+                reader.setOnImageAvailableListener(null, null)
+                
+                if (completed && callbackSuccess && resultBitmap != null) {
+                    val success = saveBitmapToFile(resultBitmap!!)
+                    Log.d(TAG, "回调截图${if (success) "成功" else "失败"}")
                     success
-                } ?: false
+                } else {
+                    if (!completed) Log.w(TAG, "回调超时，未获取到截图")
+                    else Log.w(TAG, "回调失败或未获取到图片")
+                    false
+                }
             } ?: false
-
         } catch (e: Exception) {
-            Log.d(TAG, "takeScreenshot Exception:"+e.message)
-            Log.e(TAG, "截图失败", e)
+            Log.e(TAG, "回调截图失败", e)
             false
+        }
+    }
+    
+    // 改进的轮询方式作为备选方案
+    private fun takeScreenshotWithPolling(): Boolean {
+        return try {
+            imageReader?.let { reader ->
+                Log.d(TAG, "使用轮询机制截图")
+                
+                // 清理旧图片
+                cleanupOldImages(reader)
+                
+                // 触发VirtualDisplay重新渲染
+                triggerDisplayRender()
+                
+                // 实现智能重试机制（最多10次，间隔50ms）
+                repeat(10) { attempt ->
+                    try {
+                        Thread.sleep(1200)
+                        Log.d(TAG, "轮询第${attempt + 1}次尝试获取图片")
+                        val image = reader.acquireLatestImage()
+                        Log.d(TAG, "轮询获取图片结果: $image")
+                        
+                        image?.let {
+                            val bitmap = imageToBitmap(it)
+                            val success = saveBitmapToFile(bitmap)
+                            it.close()
+                            Log.d(TAG, "轮询截图在第${attempt + 1}次尝试时${if (success) "成功" else "失败"}")
+                            return success
+                        }
+                    } catch (e: Exception) {
+                        if (attempt < 9) {
+                            Log.d(TAG, "第${attempt + 1}次截图尝试失败，继续重试: ${e.message}")
+                        } else {
+                            Log.e(TAG, "所有截图重试均失败", e)
+                        }
+                    }
+                }
+                
+                Log.e(TAG, "轮询截图：10次重试后仍未成功")
+                false
+            } ?: false
+        } catch (e: Exception) {
+            Log.e(TAG, "轮询截图失败", e)
+            false
+        }
+    }
+    
+    // 清理ImageReader中的旧图片
+    private fun cleanupOldImages(reader: ImageReader) {
+        try {
+            var image: Image?
+            var cleanedCount = 0
+            // 清理所有待处理的图片
+            do {
+                image = reader.acquireLatestImage()
+                image?.let {
+                    it.close()
+                    cleanedCount++
+                }
+            } while (image != null)
+            Log.d(TAG, "已清理ImageReader中的${cleanedCount}张旧图片")
+        } catch (e: Exception) {
+            // 正常情况，表示没有待处理的图片
+            Log.d(TAG, "ImageReader无待清理图片")
+        }
+    }
+    
+    // 触发VirtualDisplay重新渲染
+    private fun triggerDisplayRender() {
+        try {
+            // 通过延时让VirtualDisplay有足够时间渲染新内容
+            Thread.sleep(100)
+            Log.d(TAG, "已触发VirtualDisplay重新渲染")
+        } catch (e: Exception) {
+            Log.w(TAG, "触发渲染时发生异常", e)
         }
     }
 
@@ -370,28 +534,76 @@ class MediaProjectionService : Service() {
     }
 
     private fun stopMediaProjection() {
-        virtualDisplay?.release()
-        imageReader?.close()
-        mediaProjection?.stop()
-        mediaProjection = null
-        isRecording = false
-        
-        // 停止录屏，取消通知
-        val notificationManager = getSystemService(NotificationManager::class.java)
-        notificationManager?.cancel(NOTIFICATION_ID)
-        
-        Log.d(TAG, "MediaProjection已停止，通知已取消")
+        synchronized(screenshotLock) {
+            try {
+                Log.d(TAG, "stopMediaProjection()开始")
+                
+                // 等待正在进行的截图完成
+                var waitCount = 0
+                while (isCapturing.get() && waitCount < 50) {
+                    Thread.sleep(100)
+                    waitCount++
+                }
+                
+                // 清理ImageReader中所有待处理的图片
+                imageReader?.let { reader ->
+                    try {
+                        var image: Image?
+                        do {
+                            image = reader.acquireLatestImage()
+                            image?.close()
+                        } while (image != null)
+                        Log.d(TAG, "已清理所有待处理图片")
+                    } catch (e: Exception) {
+                        Log.d(TAG, "清理图片时无待处理项")
+                    }
+                }
+                
+                // 按正确顺序关闭资源：VirtualDisplay → ImageReader → MediaProjection
+                virtualDisplay?.release()
+                virtualDisplay = null
+                
+                imageReader?.close()
+                imageReader = null
+                
+                mediaProjection?.stop()
+                mediaProjection = null
+                
+                isRecording = false
+                
+                // 停止录屏，取消通知
+                val notificationManager = getSystemService(NotificationManager::class.java)
+                notificationManager?.cancel(NOTIFICATION_ID)
+                
+                Log.d(TAG, "MediaProjection已完全停止，所有资源已释放")
+            } catch (e: Exception) {
+                Log.e(TAG, "停止MediaProjection时发生异常", e)
+            }
+        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        
+        Log.d(TAG, "MediaProjectionService正在销毁")
+        
+        // 确保完全停止MediaProjection和释放所有资源
         stopMediaProjection()
         
-        // 确保服务销毁时取消通知
-        val notificationManager = getSystemService(NotificationManager::class.java)
-        notificationManager?.cancel(NOTIFICATION_ID)
+        // 停止截图Handler线程
+        screenshotHandlerThread?.quitSafely()
+        screenshotHandlerThread = null
+        screenshotHandler = null
         
-        Log.d(TAG, "MediaProjectionService已销毁")
+        // 双重保险：确保服务销毁时取消通知
+        try {
+            val notificationManager = getSystemService(NotificationManager::class.java)
+            notificationManager?.cancel(NOTIFICATION_ID)
+        } catch (e: Exception) {
+            Log.w(TAG, "销毁时取消通知失败", e)
+        }
+        
+        Log.d(TAG, "MediaProjectionService已完全销毁")
     }
 
     fun isProjectionActive(): Boolean {
