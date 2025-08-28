@@ -383,66 +383,78 @@ fun MainScreen(
                                 return@Button
                             }
                             
-                            // 所有检查通过，开始执行任务
-                            isExecutingTask = true
-                            taskLogs = emptyList()
-                            taskProgress = "准备执行任务..."
-                            taskExecutor.resetTaskState() // 重置任务状态
-                            
-                            // 在协程中执行任务
-                            (context as ComponentActivity).lifecycleScope.launch {
-                                try {
-                                    // 首先返回桌面，让应用退到后台
-                                    taskProgress = "返回桌面，准备开始执行..."
-                                    taskLogs = taskLogs + taskProgress
+                            // 所有检查通过，显示确认弹框
+                            android.app.AlertDialog.Builder(context)
+                                .setTitle("开始执行AI任务")
+                                .setMessage("即将执行任务：\n$taskInput\n\n执行过程中应用将返回后台，AI会自动控制您的设备完成任务。\n\n确认开始执行吗？")
+                                .setPositiveButton("确认执行") { _, _ ->
+                                    // 用户确认，开始执行任务
+                                    isExecutingTask = true
+                                    taskLogs = emptyList()
+                                    taskProgress = "准备执行任务..."
+                                    taskExecutor.resetTaskState() // 重置任务状态
                                     
-                                    // 返回桌面
-                                    val homeIntent = Intent(Intent.ACTION_MAIN).apply {
-                                        addCategory(Intent.CATEGORY_HOME)
-                                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                                    }
-                                    context.startActivity(homeIntent)
-                                    
-                                    // 等待返回桌面完成
-                                    delay(2000)
-                                    
-                                    taskProgress = "开始执行任务: $taskInput"
-                                    taskLogs = taskLogs + taskProgress
-                                    
-                                    val result = taskExecutor.executeTask(
-                                        taskDescription = taskInput,
-                                        onProgress = { progress ->
-                                            taskProgress = progress
-                                            taskLogs = taskLogs + progress
-                                        },
-                                        onActionResult = { actionResult ->
-                                            val logEntry = "动作: ${actionResult.action}\n" +
-                                                    "观察: ${actionResult.observation}\n" +
-                                                    "思考: ${actionResult.thought}\n" +
-                                                    "总结: ${actionResult.summary}"
-                                            taskLogs = taskLogs + logEntry
+                                    // 在协程中执行任务
+                                    (context as ComponentActivity).lifecycleScope.launch {
+                                        try {
+                                            // 首先返回桌面，让应用退到后台
+                                            taskProgress = "返回桌面，准备开始执行..."
+                                            taskLogs = taskLogs + taskProgress
+                                            
+                                            // 返回桌面
+                                            val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                                                addCategory(Intent.CATEGORY_HOME)
+                                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                            }
+                                            context.startActivity(homeIntent)
+                                            
+                                            // 等待返回桌面完成
+                                            delay(2000)
+                                            
+                                            taskProgress = "开始执行任务: $taskInput"
+                                            taskLogs = taskLogs + taskProgress
+                                            
+                                            val result = taskExecutor.executeTask(
+                                                taskDescription = taskInput,
+                                                onProgress = { progress ->
+                                                    taskProgress = progress
+                                                    taskLogs = taskLogs + progress
+                                                },
+                                                onActionResult = { actionResult ->
+                                                    val logEntry = "动作: ${actionResult.action}\n" +
+                                                            "观察: ${actionResult.observation}\n" +
+                                                            "思考: ${actionResult.thought}\n" +
+                                                            "总结: ${actionResult.summary}"
+                                                    taskLogs = taskLogs + logEntry
+                                                }
+                                            )
+                                            
+                                            taskProgress = if (result.success) {
+                                                if (result.completed) "任务已成功完成!" else result.message
+                                            } else {
+                                                "任务执行失败: ${result.message}"
+                                            }
+                                            taskLogs = taskLogs + taskProgress
+                                            
+                                            // 任务执行完成后，可以选择返回应用
+                                            if (result.success && result.completed) {
+                                                taskLogs = taskLogs + "任务执行完成，可以返回应用查看结果"
+                                            }
+                                            
+                                        } catch (e: Exception) {
+                                            taskProgress = "任务执行出现异常: ${e.message}"
+                                            taskLogs = taskLogs + taskProgress
+                                        } finally {
+                                            isExecutingTask = false
                                         }
-                                    )
-                                    
-                                    taskProgress = if (result.success) {
-                                        if (result.completed) "任务已成功完成!" else result.message
-                                    } else {
-                                        "任务执行失败: ${result.message}"
                                     }
-                                    taskLogs = taskLogs + taskProgress
-                                    
-                                    // 任务执行完成后，可以选择返回应用
-                                    if (result.success && result.completed) {
-                                        taskLogs = taskLogs + "任务执行完成，可以返回应用查看结果"
-                                    }
-                                    
-                                } catch (e: Exception) {
-                                    taskProgress = "任务执行出现异常: ${e.message}"
-                                    taskLogs = taskLogs + taskProgress
-                                } finally {
-                                    isExecutingTask = false
                                 }
-                            }
+                                .setNegativeButton("取消") { _, _ ->
+                                    // 用户取消，不执行任务
+                                    // 弹框会自动隐藏，不需要额外操作
+                                }
+                                .setCancelable(false) // 防止误触取消
+                                .show()
                         }
                     },
                     modifier = Modifier.weight(1f),
