@@ -36,8 +36,15 @@ class MainActivity : ComponentActivity() {
         if (result.resultCode == Activity.RESULT_OK) {
             result.data?.let { data ->
                 deviceController.initMediaProjection(result.resultCode, data)
-                // 权限获取成功后刷新状态
-                refreshPermissionState?.invoke()
+                // 权限获取成功后，延迟刷新状态
+                lifecycleScope.launch {
+                    // 给服务时间初始化
+                    delay(1000)
+                    refreshPermissionState?.invoke()
+                    // 再次检查以确保状态更新
+                    delay(1000)
+                    refreshPermissionState?.invoke()
+                }
             }
         } else {
             // 权限被拒绝，显示提示
@@ -86,7 +93,11 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         // 从设置页面返回时刷新权限状态
-        refreshPermissionState?.invoke()
+        lifecycleScope.launch {
+            // 延迟一下，确保服务有时间连接
+            delay(300)
+            refreshPermissionState?.invoke()
+        }
     }
     
     private fun showAccessibilityPermissionDialog() {
@@ -154,7 +165,26 @@ fun MainScreen(
     // 刷新权限状态的函数
     val refreshState = {
         isAccessibilityEnabled = deviceController.isAccessibilityServiceEnabled()
-        isScreenshotPermissionGranted = deviceController.isScreenshotPermissionGranted()
+        // 异步检查截图权限状态，增加重试机制
+        (context as ComponentActivity).lifecycleScope.launch {
+            var retryCount = 0
+            val maxRetries = 3
+            while (retryCount < maxRetries) {
+                val permissionGranted = deviceController.isScreenshotPermissionGranted()
+                if (permissionGranted) {
+                    isScreenshotPermissionGranted = true
+                    break
+                } else if (retryCount < maxRetries - 1) {
+                    // 等待服务连接，然后重试
+                    delay(500)
+                    retryCount++
+                } else {
+                    isScreenshotPermissionGranted = false
+                    break
+                }
+            }
+        }
+        Unit // 显式返回Unit
     }
     
     // 初始化时检查权限状态
@@ -163,6 +193,18 @@ fun MainScreen(
         refreshState()
         // 将刷新函数传递给父组件
         onRefreshStateCallback?.invoke(refreshState)
+        
+        // 定期检查服务连接状态（每2秒检查一次）
+        while (true) {
+            delay(2000)
+            // 只在权限未获取时才检查，避免不必要的检查
+            if (!isScreenshotPermissionGranted) {
+                val currentPermissionState = deviceController.isScreenshotPermissionGranted()
+                if (currentPermissionState != isScreenshotPermissionGranted) {
+                    isScreenshotPermissionGranted = currentPermissionState
+                }
+            }
+        }
     }
     
     Scaffold(

@@ -431,7 +431,23 @@ class DeviceController(private val context: Context) {
      * 检查截图权限是否已获取
      */
     fun isScreenshotPermissionGranted(): Boolean {
-        return mediaProjectionService?.isProjectionActive() == true
+        return try {
+            // 方法1：检查服务是否活跃
+            val serviceActive = mediaProjectionService?.isProjectionActive() == true
+            
+            // 方法2：检查服务是否已绑定
+            val serviceConnected = isServiceBound && mediaProjectionService != null
+            
+            // 记录检查结果
+            Log.d(TAG, "权限检查结果 - 设置中已启用: $serviceActive, 服务运行中: $serviceConnected")
+            
+            // 只要服务活跃或者服务已连接，就认为有权限
+            serviceActive || serviceConnected
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "检查截图权限状态失败", e)
+            false
+        }
     }
     
     /**
