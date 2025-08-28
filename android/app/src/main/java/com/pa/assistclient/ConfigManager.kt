@@ -17,7 +17,7 @@ data class TaskConfig(
     val openaiApiBase: String = "https://api.siliconflow.cn/v1/chat/completions",
     
     @SerializedName("OPENAI_API_KEY")
-    val openaiApiKey: String = "sk-ivaqwrekaoomxwyptrqgalddogeqloogkbnnwonthdjyorjv",
+    val openaiApiKey: String = "sk-",
     
     @SerializedName("OPENAI_API_MODEL")
     val openaiApiModel: String = "zai-org/GLM-4.5V",
