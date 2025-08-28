@@ -808,7 +808,7 @@ class DeviceController(private val context: Context) {
             // 设置画笔
             val textPaint = android.graphics.Paint().apply {
                 isAntiAlias = true
-                textSize = 48f
+                textSize = 30f
                 typeface = android.graphics.Typeface.DEFAULT_BOLD
                 color = if (darkMode) android.graphics.Color.BLACK else android.graphics.Color.WHITE
             }
@@ -836,11 +836,11 @@ class DeviceController(private val context: Context) {
                     // 计算标签位置（元素中心偏移）
                     val centerX = (left + right) / 2
                     val centerY = (top + bottom) / 2
-                    val labelX = centerX + 10
-                    val labelY = centerY + 10
+                    val labelX = centerX
+                    val labelY = centerY
                     
                     // 绘制边界框（可选）
-                    canvas.drawRect(left, top, right, bottom, borderPaint)
+//                    canvas.drawRect(left, top, right, bottom, borderPaint)
                     
                     // 测量文本尺寸
                     val textBounds = android.graphics.Rect()
