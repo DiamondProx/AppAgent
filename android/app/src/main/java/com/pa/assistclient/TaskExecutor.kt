@@ -135,7 +135,7 @@ class TaskExecutor(private val context: Context, private val deviceController: D
                 if (!success) {
                     return@withContext TaskResult(
                         success = false,
-                        message = "获取截图失败"
+                        message = "获取截图失败1"
                     )
                 }
                 

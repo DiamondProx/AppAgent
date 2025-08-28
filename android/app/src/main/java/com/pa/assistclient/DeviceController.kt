@@ -480,16 +480,12 @@ class DeviceController(private val context: Context) {
     
     /**
      * 截图功能
+     * 修复：避免重复调用，只使用直接调用服务实例的方式
      */
     fun takeScreenshot(): Boolean {
         return if (isServiceBound && mediaProjectionService != null) {
-            // 通过服务执行截图
-            val serviceIntent = Intent(context, MediaProjectionService::class.java).apply {
-                action = MediaProjectionService.ACTION_TAKE_SCREENSHOT
-            }
-            context.startService(serviceIntent)
-            
-            // 返回Path的判断依赖于服务的实现
+            // 直接调用服务实例方法，避免通过Intent重复触发
+            Log.d(TAG, "通过服务实例直接执行截图")
             mediaProjectionService?.takeScreenshot() ?: false
         } else {
             Log.e(TAG, "MediaProjectionService未初始化，请先请求权限")
@@ -727,7 +723,7 @@ class DeviceController(private val context: Context) {
             // 1. 获取截图
             val success = takeScreenshot()
             if (!success) {
-                Log.e(TAG, "获取截图失败")
+                Log.e(TAG, "获取截图失败2")
                 return Pair(null, emptyList())
             }
             

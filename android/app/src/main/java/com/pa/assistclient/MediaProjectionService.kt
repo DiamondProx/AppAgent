@@ -213,13 +213,16 @@ class MediaProjectionService : Service() {
 
     fun takeScreenshot(): Boolean {
         return try {
+            Log.d(TAG, "takeScreenshot")
             if (mediaProjection == null) {
                 Log.e(TAG, "MediaProjection未初始化")
                 return false
             }
 
             imageReader?.let { reader ->
+                Log.d(TAG, "reader.acquireLatestImage.start()")
                 val image = reader.acquireLatestImage()
+                Log.d(TAG, "reader.acquireLatestImage.end() image：" + image)
                 image?.let {
                     val bitmap = imageToBitmap(it)
                     val success = saveBitmapToFile(bitmap)
@@ -228,7 +231,9 @@ class MediaProjectionService : Service() {
                     success
                 } ?: false
             } ?: false
+
         } catch (e: Exception) {
+            Log.d(TAG, "takeScreenshot Exception:"+e.message)
             Log.e(TAG, "截图失败", e)
             false
         }
