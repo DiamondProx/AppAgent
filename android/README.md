@@ -116,3 +116,13 @@
 
 ### 集成AI任务执行
 在 `MainActivity.kt` 的「执行任务」按钮中实现与后端AI服务的交互逻辑。
+
+### apikey配置
+
+## local.properties下配置
+
+# OpenAI API Key (或兼容的 API 服务)
+openai.api.key=sk-your-openai-api-key-here
+
+# 阿里云通义千问 API Key
+dashscope.api.key=your-dashscope-api-key-here

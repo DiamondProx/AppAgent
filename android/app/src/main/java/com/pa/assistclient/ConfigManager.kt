@@ -17,7 +17,7 @@ data class TaskConfig(
     val openaiApiBase: String = "https://api.siliconflow.cn/v1/chat/completions",
     
     @SerializedName("OPENAI_API_KEY")
-    val openaiApiKey: String = "sk-",
+    val openaiApiKey: String = BuildConfig.OPENAI_API_KEY,
     
     @SerializedName("OPENAI_API_MODEL")
     val openaiApiModel: String = "zai-org/GLM-4.5V",
@@ -32,7 +32,7 @@ data class TaskConfig(
     val requestInterval: Int = 10,
     
     @SerializedName("DASHSCOPE_API_KEY")
-    val dashscopeApiKey: String = "",
+    val dashscopeApiKey: String = BuildConfig.DASHSCOPE_API_KEY,
     
     @SerializedName("QWEN_MODEL")
     val qwenModel: String = "qwen-vl-max",
